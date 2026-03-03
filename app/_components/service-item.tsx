@@ -1,6 +1,6 @@
 "use client"
 
-import { BarberShop, BarbershopService } from "@prisma/client"
+import { BarberShop, BarbershopService, Booking } from "@prisma/client"
 import Image from "next/image"
 import { Button } from "./ui/button"
 import { Card, CardContent } from "./ui/card"
@@ -11,15 +11,15 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "./ui/sheet"
 import { Calendar } from "./ui/calendar"
 import { ptBR } from "date-fns/locale"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { format, set } from "date-fns"
 import { createBooking } from "../_actions/create-booking"
 import { useSession } from "next-auth/react"
 import { toast } from "sonner"
+import { getBookings } from "../_actions/get-bookings"
 
 interface ServiceItemProps {
   service: BarbershopService
@@ -50,10 +50,42 @@ const TIME_LIST = [
   "18:00",
 ]
 
+const getTimeList = (bookings: Booking[]) => {
+  return TIME_LIST.filter((time) => {
+    const hour = Number(time.split(":")[0])
+    const minutes = Number(time.split(":")[1])
+
+    const hasBookingOnCurrentTime = bookings.some(
+      (booking) =>
+        booking.date.getHours() === hour &&
+        booking.date.getMinutes() === minutes,
+    )
+    if (hasBookingOnCurrentTime) {
+      return false
+    }
+    return true
+  })
+}
+
 const ServiceItem = ({ service, barbershop }: ServiceItemProps) => {
   const { data } = useSession()
   const [selectedDay, setSelectedDay] = useState<Date | undefined>()
   const [selectedTime, setSelectedTime] = useState<string | undefined>()
+  const [bookingSheetIsOpen, setBookingSheetIsOpen] = useState(false)
+
+  const [dayBookings, setDayBookings] = useState<Booking[]>([])
+
+  useEffect(() => {
+    const fetchBookings = async () => {
+      if (!selectedDay) return
+      const bookings = await getBookings({
+        userId: (data?.user as any).id,
+        date: selectedDay,
+      })
+      setDayBookings(bookings)
+    }
+    fetchBookings()
+  }, [selectedDay, data?.user])
 
   const handleDateSelect = (date: Date | undefined) => {
     setSelectedDay(date)
@@ -85,6 +117,13 @@ const ServiceItem = ({ service, barbershop }: ServiceItemProps) => {
     }
   }
 
+  const handleBookingSheetOpenChange = () => {
+    setSelectedDay(undefined)
+    setSelectedTime(undefined)
+    setDayBookings([])
+    setBookingSheetIsOpen(false)
+  }
+
   return (
     <Card>
       <CardContent className="flex items-center gap-3 p-3">
@@ -111,12 +150,18 @@ const ServiceItem = ({ service, barbershop }: ServiceItemProps) => {
               }).format(Number(service.price))}
             </p>
 
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="secondary" size="sm">
-                  Agendar
-                </Button>
-              </SheetTrigger>
+            <Sheet
+              open={bookingSheetIsOpen}
+              onOpenChange={handleBookingSheetOpenChange}
+            >
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setBookingSheetIsOpen(true)}
+              >
+                Agendar
+              </Button>
+
               <SheetContent className="px-0">
                 <SheetHeader>
                   <SheetTitle>Agendar</SheetTitle>
@@ -129,6 +174,7 @@ const ServiceItem = ({ service, barbershop }: ServiceItemProps) => {
                     selected={selectedDay}
                     onSelect={handleDateSelect}
                     locale={ptBR}
+                    hidden={{ before: new Date() }}
                     className="w-full"
                     styles={{
                       weekday: {
@@ -155,7 +201,7 @@ const ServiceItem = ({ service, barbershop }: ServiceItemProps) => {
 
                 {selectedDay && (
                   <div className="flex gap-3 overflow-x-auto border-b border-solid p-5 [&::-webkit-scrollbar]:hidden">
-                    {TIME_LIST.map((time) => (
+                    {getTimeList(dayBookings).map((time) => (
                       <Button
                         key={time}
                         variant={selectedTime === time ? "default" : "outline"}
